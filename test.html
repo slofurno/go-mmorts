@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>title</title>
+  </head>
+  <body>
+
+<script>
+
+var ws = new WebSocket("ws://localhost:1616/ws?id=asdf");
+ws.onmessage=function(event){
+  console.log(event.data);
+}
+
+var c ={PlayerId:"asdf",Unit:1234,Type:"Move",Target:"hi"};
+
+var json = JSON.stringify(c);
+
+</script>
+
+  </body>
+  </html>
