@@ -11,11 +11,55 @@
 var ws = new WebSocket("ws://localhost:1616/ws?id=asdf");
 ws.onmessage=function(event){
   console.log(event.data);
+};
+
+
+
+var testBuild = function(){
+
+  var c = new BuildCommand("asdf",123,3);
+  var json = JSON.stringify(c);
+  var command="BLD:"+json;
+
+  ws.send(command);
+
+};
+
+
+var testMove = function(){
+
+  var c = new MoveCommand("asdf",123,50,50);
+  var json = JSON.stringify(c);
+  var command="MOV:"+json;
+
+  ws.send(command);
+
+};
+
+function ReinforceCommand(playerid,squadid,unitid){
+  this.SquadId=squadid;
+  this.PlayerId=playerid;
+  this.UnitId=unitid;
 }
 
-var c ={PlayerId:"asdf",Unit:1234,Type:"Move",Target:"hi"};
+function BuildCommand(playerid,planetid,unitid){
+  this.PlanetId=planetid;
+  this.PlayerId=playerid;
+  this.UnitId=unitid;
+}
 
-var json = JSON.stringify(c);
+
+function MoveCommand(playerid,squadid,x,y){
+  this.SquadId=squadid;
+  this.PlayerId=playerid;
+  this.Target = new Vector2(x,y);
+}
+
+function Vector2(x,y){
+  this.X = x;
+  this.Y = y;
+}
+
 
 </script>
 

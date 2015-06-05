@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 )
@@ -18,6 +19,24 @@ const (
 	Text
 	G
 )
+
+type Websocket struct {
+	Done chan bool
+	conn net.Conn
+	rw   *bufio.ReadWriter
+}
+
+func (ws *Websocket) Write(b []byte) (n int, err error) {
+	rw := ws.rw
+	length := len(b)
+
+	rw.Write([]byte{129, byte(length)})
+	rw.Write(b)
+	rw.Flush()
+
+	return length, nil
+
+}
 
 func ReadFrame(reader *bufio.Reader) (string, OpCode, error) {
 	// | isfinal? | x x x | opcode(4) |
@@ -104,14 +123,14 @@ func WebsocketServer(w http.ResponseWriter, req *http.Request) {
 	rw.Flush()
 
 	incoming := make(chan string)
-	outgoing := make(chan string, 20)
 	done := make(chan bool, 2)
 
-	player := &Player{Out: outgoing, Done: done}
+	//player := &Player{Out: outgoing, Done: done}
+	ws := &Websocket{conn: conn, rw: rw, Done: done}
 
 	//oldplayer, ok := connectedPlayers[pid]
 
-	connectedPlayers[pid] = player
+	connectedPlayers[pid] = ws
 	/*
 		go func() {
 			_, err := rw.ReadByte()
@@ -159,24 +178,41 @@ func WebsocketServer(w http.ResponseWriter, req *http.Request) {
 			//delete(connectedPlayers, pid)
 			fmt.Println("disconnected")
 			return
-		case command := <-incoming:
-			fmt.Println("command", command)
-			var c Command
-			err := json.Unmarshal([]byte(command), &c)
+		case rawcommand := <-incoming:
+			fmt.Println("command", rawcommand)
+			command, err := parseCommand(rawcommand)
 
 			if err != nil {
 				//fmt.Println(err.Error())
 			} else {
-				commandQueue <- &c
+				commandQueue <- command
 
 			}
-
-		case out := <-outgoing:
-			b := []byte(out)
-			rw.Write([]byte{129, byte(len(b))})
-			rw.Write(b)
-			rw.Flush()
 		}
 	}
 
+}
+
+func parseCommand(msg string) (Command, error) {
+	ct := CommandType(msg[0:3])
+	rawcommand := msg[4:len(msg)]
+	var command Command
+	var err error
+
+	switch ct {
+	case Move:
+		var move MoveCommand
+		err = json.Unmarshal([]byte(rawcommand), &move)
+		command = &move
+	case Reinforce:
+		var reinforce ReinforceCommand
+		err = json.Unmarshal([]byte(rawcommand), &reinforce)
+		command = &reinforce
+	case Build:
+		var build BuildCommand
+		err = json.Unmarshal([]byte(rawcommand), &build)
+		command = &build
+	}
+
+	return command, err
 }
