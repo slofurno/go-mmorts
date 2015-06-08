@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -20,6 +21,59 @@ const (
 	G
 )
 
+type WebsocketManager struct {
+	connections map[string]*WebsocketVersion
+	nextid      int
+	lock        sync.Mutex
+}
+
+type WebsocketVersion struct {
+	version   int
+	websocket *Websocket
+}
+
+func NewWebsocketManager() WebsocketManager {
+	m := make(map[string]*WebsocketVersion)
+	return WebsocketManager{connections: m}
+
+}
+
+func (m *WebsocketManager) Add(key string, websocket *Websocket) int {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	m.nextid++
+	version := &WebsocketVersion{version: m.nextid, websocket: websocket}
+	m.connections[key] = version
+	return m.nextid
+}
+
+func (m *WebsocketManager) Remove(key string, version int) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	current := m.connections[key]
+
+	if current != nil && current.version == version {
+		delete(m.connections, key)
+	}
+}
+
+func (m *WebsocketManager) Enumerate() <-chan *Websocket {
+	c := make(chan *Websocket)
+
+	go func() {
+		m.lock.Lock()
+
+		for _, ws := range m.connections {
+			c <- ws.websocket
+		}
+		close(c)
+		m.lock.Unlock()
+
+	}()
+
+	return c
+}
+
 type Websocket struct {
 	Done chan bool
 	conn net.Conn
@@ -27,10 +81,26 @@ type Websocket struct {
 }
 
 func (ws *Websocket) Write(b []byte) (n int, err error) {
+
 	rw := ws.rw
 	length := len(b)
+	fmt.Println(length)
+	//as long as this works in all browsers, then its fine for < 126
+	//len64 := (length >> 16) & 255
+	llen := (length >> 8) & 255
+	rlen := length & 255
 
-	rw.Write([]byte{129, byte(length)})
+	rw.Write([]byte{129, 126, byte(llen), byte(rlen)})
+
+	//rw.Write([]byte{129, 127, byte(0), byte(0), byte(0), byte(len64), byte(llen), byte(rlen)})
+
+	/*
+		if length > 125 {
+
+		} else {
+			rw.Write([]byte{129, byte(length)})
+		}
+	*/
 	rw.Write(b)
 	rw.Flush()
 
@@ -52,12 +122,12 @@ func ReadFrame(reader *bufio.Reader) (string, OpCode, error) {
 
 	fmt.Printf("header length read : %d \n", hlen)
 
-	var isFinal = header[0] >> 7
+	//var isFinal = header[0] >> 7
 	var opcode = header[0] & 15
-	var isMasked = header[1] >> 7
+	//var isMasked = header[1] >> 7
 	var length = int(header[1] & 127)
-	fmt.Printf("raw header : %b %b \n", header[0], header[1])
-	fmt.Printf("header : %d %d %d %d \n", isFinal, opcode, isMasked, length)
+	//fmt.Printf("raw header : %b %b \n", header[0], header[1])
+	//fmt.Printf("header : %d %d %d %d \n", isFinal, opcode, isMasked, length)
 
 	if opcode == 8 {
 		return "", Close, nil
@@ -83,7 +153,7 @@ func ReadFrame(reader *bufio.Reader) (string, OpCode, error) {
 	}
 
 	s := string(body[:length])
-	fmt.Printf("string : %s \n", s)
+	//fmt.Printf("string : %s \n", s)
 	return s, Text, nil
 
 }
@@ -129,7 +199,7 @@ func WebsocketServer(w http.ResponseWriter, req *http.Request) {
 	ws := &Websocket{conn: conn, rw: rw, Done: done}
 
 	//oldplayer, ok := connectedPlayers[pid]
-
+	version := connectionManager.Add(pid, ws)
 	connectedPlayers[pid] = ws
 	/*
 		go func() {
@@ -177,11 +247,12 @@ func WebsocketServer(w http.ResponseWriter, req *http.Request) {
 		case <-disconnected:
 			//delete(connectedPlayers, pid)
 			fmt.Println("disconnected")
+			connectionManager.Remove(pid, version)
 			return
 		case rawcommand := <-incoming:
-			fmt.Println("command", rawcommand)
+			//fmt.Println("command", rawcommand)
 			command, err := parseCommand(rawcommand)
-
+			fmt.Println(command)
 			if err != nil {
 				//fmt.Println(err.Error())
 			} else {
@@ -194,21 +265,22 @@ func WebsocketServer(w http.ResponseWriter, req *http.Request) {
 }
 
 func parseCommand(msg string) (Command, error) {
-	ct := CommandType(msg[0:3])
+	ct := msg[0:3]
 	rawcommand := msg[4:len(msg)]
+	fmt.Println(ct, rawcommand)
 	var command Command
 	var err error
 
 	switch ct {
-	case Move:
+	case "MOV":
 		var move MoveCommand
 		err = json.Unmarshal([]byte(rawcommand), &move)
 		command = &move
-	case Reinforce:
+	case "ADD":
 		var reinforce ReinforceCommand
 		err = json.Unmarshal([]byte(rawcommand), &reinforce)
 		command = &reinforce
-	case Build:
+	case "BLD":
 		var build BuildCommand
 		err = json.Unmarshal([]byte(rawcommand), &build)
 		command = &build

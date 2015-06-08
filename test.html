@@ -3,16 +3,31 @@
   <head>
     <meta charset="utf-8">
     <title>title</title>
+    <style>
+    body{
+      margin:0;
+    }
+    </style>
   </head>
-  <body>
+  <body style="background-color:ghostwhite" oncontextmenu="return false;">
+
+  <canvas id="canvas" width="800" height="600" style="display:inline-block;"></canvas>
+  <div id="hud" style="display:inline-block; height:100%; vertical-align: top;">tevs</div>
 
 <script>
 
-var ws = new WebSocket("ws://localhost:1616/ws?id=asdf");
-ws.onmessage=function(event){
-  console.log(event.data);
-};
+var PLAYERID = "asdf";
 
+var ws = new WebSocket("ws://localhost:1616/ws?id=" + PLAYERID);
+ws.onmessage=function(event){
+  //console.log(event.data);
+  var json = JSON.parse(event.data);
+ // console.log(json);
+  //_ships.push(json.Ships);
+  //_squads.push(json.Squads);
+  _ships[0]=json.Ships;
+  _squads[0]=json.Squads;
+};
 
 
 var testBuild = function(){
@@ -26,9 +41,8 @@ var testBuild = function(){
 };
 
 
-var testMove = function(){
+var testMove = function(c){
 
-  var c = new MoveCommand("asdf",123,50,50);
   var json = JSON.stringify(c);
   var command="MOV:"+json;
 
@@ -60,6 +74,94 @@ function Vector2(x,y){
   this.Y = y;
 }
 
+var hud = document.getElementById("hud");
+var canvas = document.getElementById("canvas");
+var ctx = canvas.getContext("2d");
+var viewoffsetx=0;
+var viewoffsety=0;
+var _ships = [];
+var _squads = [];
+var selected = null;
+
+function UpdateHud(){
+
+  var ships = _ships[_ships.length-1];
+  var selectedships = ships.filter(function(ship){
+    return ship.SquadId===selected.Id;
+  });
+
+  var d = "<ul>" + selectedships.length + " ships selected \r\n";
+
+  for(var i = 0;i<selectedships.length;i++){
+    d+= "<li>" + selectedships[i].Id+"</li>";
+  }
+
+  d+="</ul>";
+  hud.innerHTML=d;
+
+}
+
+canvas.addEventListener("mousedown",function(e){
+
+  e.preventDefault();
+
+  var x=e.clientX+document.body.scrollLeft;
+  var y = e.clientY+document.body.scrollTop;
+  if (e.button===0){
+
+    var squads = _squads[_squads.length-1];
+  console.log(squads);
+
+    for(var i = 0;i<squads.length;i++){
+      var p = squads[i].Position;
+      console.log(x,y,p);
+      if (!(x<p.X-10 || x>p.X+10 || y <p.Y-10 || y>p.Y+10)){
+        console.log("clicked one");
+        selected=squads[i];
+        UpdateHud();
+        break;
+      }
+    }
+
+  }else if (e.button===2){
+    if (selected!=null){
+      var c = new MoveCommand(PLAYERID,selected.Id,x,y);
+      testMove(c);
+    }
+  }
+
+  return false;
+});
+
+
+
+
+
+
+function Draw(){
+
+  requestAnimationFrame(Draw);
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(0,0,canvas.width,canvas.height)
+
+  ctx.fillStyle = "#FF0000";
+  var ships = _ships[_ships.length-1];
+
+  for(var i = 0;i<ships.length;i++){
+    ctx.fillRect(ships[i].Position.X-5,ships[i].Position.Y-5,10,10);
+  }
+
+  ctx.fillStyle = "#FFFFFF";
+  var squads = _squads[_squads.length-1];
+
+  for(var i = 0;i<squads.length;i++){
+    ctx.fillRect(squads[i].Position.X-10,squads[i].Position.Y-10,20,20);
+  }
+
+
+}
+
+requestAnimationFrame(Draw);
 
 </script>
 

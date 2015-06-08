@@ -1,57 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
+	"reflect"
+	"runtime"
 	"time"
 )
-
-type Planet struct {
-	Owner    string
-	Position Vector2
-}
-
-type Player struct {
-}
-
-type Unit interface {
-	GetPosition() *Vector2
-}
-
-type Movable interface {
-	GetHeading(unit Unit)
-}
-
-type Ship struct {
-	Position *Vector2
-	Owner    string
-	Squad    *Squad
-}
-
-func (s *Ship) GetHeading(unit Unit) *Vector2 {
-	dst := unit.GetPosition()
-
-	dy := dst.Y - s.Position.Y
-	dx := dst.X - s.Position.X
-
-	delta := &Vector2{Y: dy, X: dx}
-	return delta.Normalize()
-}
-
-type Squad struct {
-	Position *Vector2
-	Owner    string
-	Ships    []*Ship
-}
-
-func (squad *Squad) Add(ship *Ship) {
-	squad.Ships = append(squad.Ships, ship)
-}
-
-func (s *Squad) GetPosition() *Vector2 {
-	return s.Position
-}
 
 type Vector2 struct {
 	X float64
@@ -59,13 +16,29 @@ type Vector2 struct {
 }
 
 func (v *Vector2) Normalize() *Vector2 {
-
-	d := math.Sqrt(v.X*v.X + v.Y*v.Y)
+	d := v.Length() //math.Sqrt(v.X*v.X + v.Y*v.Y)
 	x := v.X / d
 	y := v.Y / d
 	return &Vector2{X: x, Y: y}
 
 }
+
+func (v *Vector2) Length() float64 {
+	return math.Sqrt(v.X*v.X + v.Y*v.Y)
+}
+
+func NewVector2(x float64, y float64) *Vector2 {
+	return &Vector2{X: x, Y: y}
+}
+
+func Distance(v1 *Vector2, v2 *Vector2) float64 {
+	x := v2.X - v1.X
+	y := v2.Y - v1.Y
+
+	return math.Sqrt(x*x + y*y)
+}
+
+var connectionManager = NewWebsocketManager()
 
 var connectedPlayers = make(map[string]*Websocket)
 var commandQueue = make(chan Command, 500)
@@ -73,11 +46,12 @@ var squads = make(map[int]*Squad)
 var ships = make(map[int]*Ship)
 
 func processCommand(command Command) {
+	fmt.Println("command type", reflect.TypeOf(command))
 	switch command := command.(type) {
-	case MoveCommand:
+	case *MoveCommand:
 		squad := squads[command.SquadId]
 		squad.Position = &command.Target
-	case ReinforceCommand:
+	case *ReinforceCommand:
 		squad := squads[command.SquadId]
 		ship := ships[command.UnitId]
 
@@ -86,9 +60,10 @@ func processCommand(command Command) {
 			return
 		}
 		//squad.Add(ship)
-		ship.Squad = squad
+		squad.Add(ship)
+		//ship.setSquad(squad)
 
-	case BuildCommand:
+	case *BuildCommand:
 
 	default:
 		fmt.Println("unrecoginized command type")
@@ -97,20 +72,72 @@ func processCommand(command Command) {
 }
 
 func PrintShips() {
+	//var buffer []byte
+	buffer := []byte("{\"Ships\":[")
+
+	index := 0
+
 	for _, ship := range ships {
-		fmt.Println(ship.Position)
+		if index > 0 {
+			buffer = append(buffer, []byte(",")...)
+		}
+		s, _ := json.Marshal(ship)
+		buffer = append(buffer, []byte(s)...)
+		index++
 	}
+	buffer = append(buffer, []byte("],\"Squads\":[")...)
+
+	index = 0
+	for _, squad := range squads {
+		if index > 0 {
+			buffer = append(buffer, []byte(",")...)
+		}
+		s, _ := json.Marshal(squad)
+		buffer = append(buffer, []byte(s)...)
+		index++
+	}
+
+	buffer = append(buffer, []byte("]}")...)
+
+	//fmt.Println(string(buffer))
+
+	for ws := range connectionManager.Enumerate() {
+		ws.Write([]byte(buffer))
+	}
+
 }
 
 func Update() {
 	for _, ship := range ships {
-		if ship.Squad != nil {
-			heading := ship.GetHeading(ship.Squad)
+		if ship.squad != nil {
+			heading := ship.GetHeading(ship.squad)
+			ship.force.X = heading.X
+			ship.force.Y = heading.Y
 			//fmt.Println(heading)
-			ship.Position.X += heading.X
-			ship.Position.Y += heading.Y
+			//ship.Position.X += heading.X
+			//ship.Position.Y += heading.Y
 
 		}
+
+		for _, other := range ships {
+
+			if ship != other {
+				d := Distance(other.Position, ship.Position)
+				if d <= 10 {
+					v := other.GetHeading(ship)
+
+					ship.force.X += v.X * ((10 - d) / 10)
+					ship.force.Y += v.Y * ((10 - d) / 10)
+				}
+			}
+		}
+
+	}
+
+	for _, ship := range ships {
+
+		ship.Position.X += ship.force.X
+		ship.Position.Y += ship.force.Y
 	}
 
 }
@@ -122,27 +149,52 @@ func Loop() {
 		case command := <-commandQueue:
 			processCommand(command)
 		default:
-			fmt.Println("updating")
+			start := time.Now()
 			Update()
+			elapsed := time.Since(start)
+			fmt.Printf("update elapsed: %s\r\n", elapsed)
 			return
 		}
 	}
 
 }
 
+var _nextid int = 0
+
+func nextId() int {
+	_nextid++
+	return _nextid
+}
+
 func main() {
+	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	pos := &Vector2{X: 1000, Y: 1000}
-	pos1 := &Vector2{X: 0, Y: 0}
-	pos2 := &Vector2{X: 2000, Y: 0}
-	testsquad := &Squad{Position: pos}
-	squads[1] = testsquad
+	//testsquad := &Squad{Position: pos, Id: nextId()}
 
-	testship1 := &Ship{Squad: testsquad, Position: pos1}
-	testship2 := &Ship{Squad: testsquad, Position: pos2}
+	squads[1] = NewSquad(200, 100, "asdf")
+	squads[2] = NewSquad(300, 100, "asdf")
+	squads[3] = NewSquad(400, 100, "asdf")
+	squads[4] = NewSquad(500, 100, "asdf")
+	squads[5] = NewSquad(100, 200, "asdf")
+	squads[6] = NewSquad(100, 300, "asdf")
+	squads[7] = NewSquad(100, 400, "asdf")
+	squads[8] = NewSquad(100, 500, "asdf")
+	squads[9] = NewSquad(600, 300, "asdf")
+	squads[10] = NewSquad(100, 100, "asdf")
 
-	ships[1] = testship1
-	ships[2] = testship2
+	for j := 1; j < 11; j++ {
+
+		testships := []*Ship{}
+		squad := squads[j]
+
+		for i := 0; i < 50; i++ {
+
+			n := NewShip(500, 500, "asdf")
+			testships = append(testships, n)
+			ships[n.Id] = n
+		}
+		squad.Add(testships...)
+	}
 
 	go func() {
 		for {
