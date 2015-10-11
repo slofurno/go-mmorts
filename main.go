@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+func Tester() bool {
+	return true
+}
+
 type Vector2 struct {
 	X float64
 	Y float64
