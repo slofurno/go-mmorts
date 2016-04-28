@@ -16,23 +16,31 @@
 
 <script>
 
-var PLAYERID = "asdf";
+var alpha = "qwertyuioplkjhgfdsazxcvbnm1234567890";
+var PLAYERID = [].slice.call("asdf").map(randInt).map(x => alpha[x]).join("");
+var next
+var prev
 
-var ws = new WebSocket("ws://localhost:1616/ws?id=" + PLAYERID);
+function randInt() {
+  return (Math.random() * 35)|0;
+}
+
+var ws = new WebSocket("ws://"+location.hostname+":1616/ws?id=" + PLAYERID);
 ws.onmessage=function(event){
   //console.log(event.data);
   var json = JSON.parse(event.data);
+  json.Ships.sort((a,b) => b.Id - a.Id);
  // console.log(json);
   //_ships.push(json.Ships);
   //_squads.push(json.Squads);
-  _ships[0]=json.Ships;
-  _squads[0]=json.Squads;
+  prev = next;
+  next = {Ships: json.Ships, Squads: json.Squads, t: Date.now()}
 };
 
 
 var testBuild = function(){
 
-  var c = new BuildCommand("asdf",123,3);
+  var c = new BuildCommand(PLAYERID,123,3);
   var json = JSON.stringify(c);
   var command="BLD:"+json;
 
@@ -85,7 +93,7 @@ var selected = null;
 
 function UpdateHud(){
 
-  var ships = _ships[_ships.length-1];
+  var ships = next.Ships;
   var selectedships = ships.filter(function(ship){
     return ship.SquadId===selected.Id;
   });
@@ -109,8 +117,7 @@ canvas.addEventListener("mousedown",function(e){
   var y = e.clientY+document.body.scrollTop;
   if (e.button===0){
 
-    var squads = _squads[_squads.length-1];
-  console.log(squads);
+    var squads = next.Squads;
 
     for(var i = 0;i<squads.length;i++){
       var p = squads[i].Position;
@@ -134,25 +141,57 @@ canvas.addEventListener("mousedown",function(e){
 });
 
 
-
-
+var colors = [
+  "cornflowerblue",
+  "red",
+  "limegreen",
+  "gold",
+  "lightskyblue",
+  "palegreen",
+  "mistyrose",
+  "green",
+  "slateblue",
+  "yellow",
+  "violet",
+  "lime",
+  "whitesmoke"
+];
 
 
 function Draw(){
 
   requestAnimationFrame(Draw);
+
+  if (!prev) return
+
   ctx.fillStyle = "#000000";
   ctx.fillRect(0,0,canvas.width,canvas.height)
 
   ctx.fillStyle = "#FF0000";
-  var ships = _ships[_ships.length-1];
+  var t0 = prev.t;
+  var t1 = next.t;
+  var dt = t1-t0;
+  var now = Date.now() - dt;
+  var r = (now-t0)/dt;
+  console.log(r);
 
-  for(var i = 0;i<ships.length;i++){
-    ctx.fillRect(ships[i].Position.X-5,ships[i].Position.Y-5,10,10);
+  for(var i = 0;i<prev.Ships.length;i++){
+    ctx.fillStyle = colors[prev.Ships[i].SquadId];
+    var x0 = prev.Ships[i].Position.X
+    var y0 = prev.Ships[i].Position.Y
+    var x1 = next.Ships[i].Position.X
+    var y1 = next.Ships[i].Position.Y
+    var dy = y1-y0;
+    var dx = x1-x0;
+
+    var x = x0 + dx*r;
+    var y = y0 + dy*r;
+    //ctx.fillRect(ships[i].Position.X-7,ships[i].Position.Y-7,10,10);
+    ctx.fillRect(x-7,y-7,10,10);
   }
 
   ctx.fillStyle = "#FFFFFF";
-  var squads = _squads[_squads.length-1];
+  var squads = next.Squads;
 
   for(var i = 0;i<squads.length;i++){
     ctx.fillRect(squads[i].Position.X-10,squads[i].Position.Y-10,20,20);

@@ -75,18 +75,24 @@ func processCommand(command Command) {
 
 }
 
+func tevs(ship *Ship) []byte {
+	return []byte(fmt.Sprintf(`{"Id": %v, "Position": {"X": %v, "Y": %v}, "Owner": "%s", "SquadId": %v}`,
+		ship.Id, int(ship.Position.X), int(ship.Position.Y), ship.Owner, ship.SquadId))
+}
+
 func PrintShips() {
 	//var buffer []byte
 	buffer := []byte("{\"Ships\":[")
 
 	index := 0
-
+	//{Id: 308, Position: {X: 528.3671435881923, Y: 502.9459797618328}, Owner: "asdf", SquadId: 6}
 	for _, ship := range ships {
 		if index > 0 {
 			buffer = append(buffer, []byte(",")...)
 		}
-		s, _ := json.Marshal(ship)
-		buffer = append(buffer, []byte(s)...)
+		//s, _ := json.Marshal(ship)
+		//buffer = append(buffer, []byte(s)...)
+		buffer = append(buffer, tevs(ship)...)
 		index++
 	}
 	buffer = append(buffer, []byte("],\"Squads\":[")...)
@@ -111,6 +117,8 @@ func PrintShips() {
 
 }
 
+const radius = 20
+
 func Update() {
 	for _, ship := range ships {
 		if ship.squad != nil {
@@ -127,11 +135,11 @@ func Update() {
 
 			if ship != other {
 				d := Distance(other.Position, ship.Position)
-				if d <= 10 {
+				if d <= radius {
 					v := other.GetHeading(ship)
 
-					ship.force.X += v.X * ((10 - d) / 10)
-					ship.force.Y += v.Y * ((10 - d) / 10)
+					ship.force.X += v.X * ((radius - d) / radius)
+					ship.force.Y += v.Y * ((radius - d) / radius)
 				}
 			}
 		}
@@ -201,11 +209,15 @@ func main() {
 	}
 
 	go func() {
+		i := 0
 		for {
 			select {
 			case <-time.After(time.Millisecond * 20):
 				Loop()
-				PrintShips()
+				i = (i + 1) & 7
+				if i == 0 {
+					PrintShips()
+				}
 			}
 
 		}
